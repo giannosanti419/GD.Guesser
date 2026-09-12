@@ -1,114 +1,1425 @@
-/* GDLE - Geometry Dash guessing game
-   Data sources:
-   - GDBrowser community API for level metadata/search.
-   - Pointercrate API for the ranked Demon List.
+```javascript
+// ============================================================
+// GDLE — Geometry Dash Guessing Game
+// ============================================================
 
-   IMAGE API:
-   The optional image endpoint below is deliberately isolated so it can be
-   replaced if its public format changes. If it fails, GDLE creates a clean
-   metadata card automatically instead of breaking the game.
-*/
-const GDBROWSER='https://gdbrowser.com/api';
-const POINTERCRATE='https://pointercrate.com/api/v2/demons/listed/';
-const IMAGE_API='https://gd-level-api.liamt.xyz';
+const GDBROWSER = 'https://gdbrowser.com/api';
+const POINTERCRATE = 'https://pointercrate.com/api/v2/demons/listed/';
 
-const fallbackLevels=[
- {id:'128',name:'1st level',author:'real storm'},
- {id:'10565798',name:'Bloodbath',author:'Riot'},
- {id:'4284013',name:'Nine Circles',author:'Zobros'},
- {id:'11261085',name:'Slaughterhouse',author:'icedcave'}
+const fallbackLevels = [
+    { id: '128', name: '1st level', author: 'real storm' },
+    { id: '10565798', name: 'Bloodbath', author: 'Riot' },
+    { id: '4284013', name: 'Nine Circles', author: 'Zobros' },
+    { id: '11261085', name: 'Slaughterhouse', author: 'icedcave' }
 ];
-let currentMode='name', currentTime=15, currentLevel=null, timerId=null, endAt=0, score=0, roundDone=false;
-let demonCache=[];
 
-const $=id=>document.getElementById(id);
-function showSection(id){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));$(id)?.classList.add('active');window.scrollTo({top:0,behavior:'smooth'});}
+let currentMode = 'name';
+let currentTime = 15;
+let currentLevel = null;
+let timerId = null;
+let endAt = 0;
+let score = 0;
+let roundDone = false;
+let demonCache = [];
 
-document.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>showSection(b.dataset.section));
-document.querySelectorAll('.mode-card').forEach(b=>b.onclick=()=>{if(b.dataset.daily) startDaily(currentMode);else {currentMode=b.dataset.mode;prepareGame();}});
-document.querySelectorAll('.time-buttons button').forEach(b=>b.onclick=()=>setTime(+b.dataset.time));
-$('timeSlider').oninput=e=>setTime(+e.target.value);
-$('startBtn').onclick=startGame;
-$('submitBtn').onclick=submitAnswer;
-$('nextBtn').onclick=startGame;
-$('answer').addEventListener('keydown',e=>{if(e.key==='Enter')submitAnswer()});
-$('percent').addEventListener('keydown',e=>{if(e.key==='Enter')submitAnswer()});
-document.querySelectorAll('.daily-mode').forEach(b=>b.onclick=()=>{currentMode=b.dataset.dailyMode;startDaily(currentMode)});
 
-function setTime(v){currentTime=v;$('timeValue').textContent=v;$('timeSlider').value=v}
-function prepareGame(){showSection('play');$('setupPanel').classList.remove('hidden');$('gamePanel').classList.add('hidden');const titles={name:['Guess the Level','Identify the level from its image.'],namePercent:['Level + Percentage','Guess the level and the progress shown.'],position:['Extreme Position','Guess the current Pointercrate position.']};$('setupTitle').textContent=titles[currentMode][0];$('setupDescription').textContent=titles[currentMode][1]+' Choose your time limit.'}
+// ============================================================
+// BASIC HELPERS
+// ============================================================
 
-async function getLevel(id){const r=await fetch(`${GDBROWSER}/level/${encodeURIComponent(id)}`);if(!r.ok)throw new Error('GDBrowser error');return r.json()}
-async function searchLevels(q){const r=await fetch(`${GDBROWSER}/search/${encodeURIComponent(q)}`);if(!r.ok)throw new Error('Search error');return r.json()}
+const $ = id => document.getElementById(id);
 
-async function getRandomLevel(){
-  // Search-based randomization is used because the GD servers do not expose a
-  // simple "give me one random level" endpoint. Several broad searches are
-  // sampled, then one result is selected locally.
-  const queries=['the','a','i','gd','level','x','y'];
-  try{
-    const q=queries[Math.floor(Math.random()*queries.length)];
-    const data=await searchLevels(q);
-    const arr=Array.isArray(data)?data:(data?.levels||data?.data||[]);
-    if(arr.length){return arr[Math.floor(Math.random()*arr.length)]}
-  }catch(e){}
-  return fallbackLevels[Math.floor(Math.random()*fallbackLevels.length)];
-}
+function showSection(id) {
+    document.querySelectorAll('.section').forEach(s => {
+        s.classList.remove('active');
+    });
 
-function normalize(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'')}
-function levenshtein(a,b){
-  a=normalize(a); b=normalize(b);
-  const d=Array.from({length:a.length+1},(_,i)=>[i]);
-  for(let j=1;j<=b.length;j++) d[0][j]=j;
-  for(let i=1;i<=a.length;i++){
-    d[i]=[i];
-    for(let j=1;j<=b.length;j++){
-      d[i][j]=Math.min(
-        d[i-1][j]+1,
-        d[i][j-1]+1,
-        d[i-1][j-1]+(a[i-1]===b[j-1]?0:1)
-      );
+    const section = $(id);
+
+    if (section) {
+        section.classList.add('active');
     }
-  }
-  return d[a.length][b.length];
+
+    window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+    });
 }
-function nameCorrect(input,answer){const a=normalize(input),b=normalize(answer);if(!a)return false;return a===b || (a.length>=5 && (b.includes(a)||a.includes(b))) || levenshtein(a,b)<=Math.max(1,Math.floor(b.length*.12))}
 
-async function imageFor(level){
-  // Public card endpoint used by the 2026 GD Level API project. If its route
-  // changes or is unavailable, the fallback card below is generated locally.
-  const id=level.id;
-  const candidates=[`${IMAGE_API}/level/${id}/card.png`,`${IMAGE_API}/levels/${id}/card.png`,`${IMAGE_API}/card/${id}.png`];
-  for(const url of candidates){if(await testImage(url))return url}
-  return makeFallbackCard(level);
+
+// ============================================================
+// NAVIGATION
+// ============================================================
+
+document.querySelectorAll('[data-section]').forEach(button => {
+    button.onclick = () => {
+        showSection(button.dataset.section);
+    };
+});
+
+document.querySelectorAll('.mode-card').forEach(button => {
+    button.onclick = () => {
+        if (button.dataset.daily) {
+            startDaily(currentMode);
+            return;
+        }
+
+        currentMode = button.dataset.mode;
+        prepareGame();
+    };
+});
+
+
+// ============================================================
+// TIME SETTINGS
+// ============================================================
+
+function setTime(value) {
+    currentTime = value;
+
+    $('timeValue').textContent = value;
+    $('timeSlider').value = value;
 }
-function testImage(url){return new Promise(resolve=>{const im=new Image();let done=false;const finish=v=>{if(done)return;done=true;resolve(v)};im.onload=()=>finish(im.naturalWidth>100);im.onerror=()=>finish(false);im.src=url+'?v='+Date.now()})}
-function makeFallbackCard(level){const canvas=document.createElement('canvas');canvas.width=1280;canvas.height=720;const c=canvas.getContext('2d');let h=0;for(const ch of String(level.id||level.name))h=(h*31+ch.charCodeAt(0))>>>0;const hue=h%360;const g=c.createLinearGradient(0,0,1280,720);g.addColorStop(0,`hsl(${hue},70%,18%)`);g.addColorStop(1,`hsl(${(hue+80)%360},70%,8%)`);c.fillStyle=g;c.fillRect(0,0,1280,720);c.fillStyle='rgba(255,255,255,.07)';for(let i=0;i<16;i++){c.beginPath();c.arc((h>>i)%1280,(h*13+i*71)%720,80+i*11,0,Math.PI*2);c.fill()}c.fillStyle='#fff';c.font='900 58px system-ui';c.fillText('MYSTERY LEVEL',70,100);c.font='700 36px system-ui';c.fillStyle='rgba(255,255,255,.7)';c.fillText('GDLE • image fallback',70,155);return canvas.toDataURL('image/jpeg',.85)}
 
-async function startGame(){
-  clearInterval(timerId);roundDone=false;$('feedback').textContent='';$('feedback').className='feedback';$('nextBtn').classList.add('hidden');$('submitBtn').disabled=false;$('answer').value='';$('percent').value='';
-  $('setupPanel').classList.add('hidden');$('gamePanel').classList.remove('hidden');$('modeLabel').textContent=currentMode==='name'?'GUESS THE LEVEL':currentMode==='namePercent'?'LEVEL + PERCENTAGE':'EXTREME POSITION';$('questionText').textContent=currentMode==='position'?'What is this level\'s current Demon List position?':'What level is this?';
-  $('answer').classList.toggle('hidden',false);$('percent').classList.toggle('hidden',currentMode!=='namePercent');$('answer').placeholder=currentMode==='position'?'Level name...':'Level name...';
-  try{currentLevel=await getRandomLevel();if(currentMode==='position'){currentLevel=await getRandomExtreme()}const full=await getLevel(currentLevel.id||currentLevel.levelID||currentLevel.id);currentLevel={...currentLevel,...full};$('levelImage').src=await imageFor(currentLevel);if(currentMode==='position')$('questionText').textContent="What is this level's current Demon List position?";startTimer()}catch(e){$('feedback').textContent='Could not load a level. Try again.';$('feedback').className='feedback bad';}
+document.querySelectorAll('.time-buttons button').forEach(button => {
+    button.onclick = () => {
+        setTime(Number(button.dataset.time));
+    };
+});
+
+$('timeSlider').oninput = event => {
+    setTime(Number(event.target.value));
+};
+
+
+// ============================================================
+// BUTTONS / INPUTS
+// ============================================================
+
+$('startBtn').onclick = startGame;
+$('submitBtn').onclick = submitAnswer;
+$('nextBtn').onclick = startGame;
+
+$('answer').addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+        submitAnswer();
+    }
+});
+
+$('percent').addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+        submitAnswer();
+    }
+});
+
+document.querySelectorAll('.daily-mode').forEach(button => {
+    button.onclick = () => {
+        currentMode = button.dataset.dailyMode;
+        startDaily(currentMode);
+    };
+});
+
+
+// ============================================================
+// GAME SETUP
+// ============================================================
+
+function prepareGame() {
+    showSection('play');
+
+    $('setupPanel').classList.remove('hidden');
+    $('gamePanel').classList.add('hidden');
+
+    const titles = {
+        name: [
+            'Guess the Level',
+            'Identify the level from its image.'
+        ],
+
+        namePercent: [
+            'Level + Percentage',
+            'Guess the level and the progress shown.'
+        ],
+
+        position: [
+            'Extreme Position',
+            'Guess the current Demon List position.'
+        ]
+    };
+
+    $('setupTitle').textContent = titles[currentMode][0];
+
+    $('setupDescription').textContent =
+        titles[currentMode][1] +
+        ' Choose your time limit.';
 }
-async function getRandomExtreme(){
-  if(!demonCache.length){const r=await fetch(POINTERCRATE);const data=await r.json();demonCache=Array.isArray(data)?data:(data?.data||[])}
-  const d=demonCache[Math.floor(Math.random()*demonCache.length)];return {id:d.id,name:d.name,position:d.position,author:d.publisher||d.creator||''}
+
+
+// ============================================================
+// GDBROWSER API
+// ============================================================
+
+async function getLevel(id) {
+    const response = await fetch(
+        `${GDBROWSER}/level/${encodeURIComponent(id)}`
+    );
+
+    if (!response.ok) {
+        throw new Error('GDBrowser level request failed');
+    }
+
+    return await response.json();
 }
-function startTimer(){endAt=performance.now()+currentTime*1000;updateTimer();timerId=setInterval(updateTimer,50)}
-function updateTimer(){const left=Math.max(0,endAt-performance.now());$('timer').textContent=(left/1000).toFixed(1);$('timerBar').style.width=(left/(currentTime*1000)*100)+'%';if(left<=0){clearInterval(timerId);finishRound(false,'Time\'s up!')}}
-function finishRound(correct,msg){if(roundDone)return;roundDone=true;clearInterval(timerId);$('submitBtn').disabled=true;$('nextBtn').classList.remove('hidden');$('feedback').textContent=msg;$('feedback').className='feedback '+(correct?'ok':'bad');$('scoreLine').textContent=`Score: ${score}`}
-function submitAnswer(){if(roundDone||!currentLevel)return;const nameOk=nameCorrect($('answer').value,currentLevel.name);let correct=nameOk;let details='';if(currentMode==='namePercent'){const p=Number($('percent').value);const target=Number(currentLevel.percent??currentLevel.progress??currentLevel.bestPercent??randomPercent(currentLevel.id));const pOk=Number.isFinite(p)&&Math.abs(p-target)<=2;correct=nameOk&&pOk;details=`Correct: ${currentLevel.name} • ${target}%`;}else if(currentMode==='position'){const guessed=Number($('percent').value||$('answer').value);correct=Number.isFinite(guessed)&&guessed===Number(currentLevel.position);details=`Correct: #${currentLevel.position} — ${currentLevel.name}`;}else details=`Correct: ${currentLevel.name}`;if(correct){score+=1;finishRound(true,'✓ Correct! '+details)}else finishRound(false,'✕ '+details)}
-function randomPercent(seed){let n=0;for(const c of String(seed))n=(n*33+c.charCodeAt(0))%101;return Math.max(1,n)}
 
-async function startDaily(mode){currentMode=mode;prepareGame();await startGame();}
-function dailySeed(){const d=new Date();return `${d.getUTCFullYear()}-${d.getUTCMonth()+1}-${d.getUTCDate()}`}
 
-async function loadDemonList(){const el=$('demonList');el.innerHTML='<small>Loading…</small>';try{const r=await fetch(POINTERCRATE);const data=await r.json();demonCache=Array.isArray(data)?data:(data?.data||[]);el.innerHTML=demonCache.slice(0,150).map((d,i)=>`<div class="list-item"><span><b>#${d.position||i+1} — ${escapeHtml(d.name)}</b><br><small>${escapeHtml(d.publisher||d.creator||'')}</small></span><small>${escapeHtml(String(d.verifier||''))}</small></div>`).join('')}catch(e){el.innerHTML='<small>Could not load Pointercrate right now.</small>'}}
-async function loadExtremes(){const el=$('extremeList');el.innerHTML='<small>Loading…</small>';try{const q=$('extremeSearch').value.trim()||'demon';const data=await searchLevels(q);const arr=Array.isArray(data)?data:(data?.levels||data?.data||[]);el.innerHTML=arr.filter(x=>String(x.difficulty||'').toLowerCase().includes('extreme')||x.demonList).slice(0,100).map(x=>`<div class="list-item"><span><b>${escapeHtml(x.name||'Unknown')}</b><br><small>${escapeHtml(x.author||x.creator||'')}</small></span><small>${x.demonList?'#'+x.demonList:'Extreme Demon'}</small></div>`).join('')||'<small>No results. Try a different search.</small>'}catch(e){el.innerHTML='<small>Could not load extreme demons.</small>'}}
-async function loadAllLevels(){const el=$('allLevelList');el.innerHTML='<small>Loading…</small>';const q=$('levelSearch').value.trim()||'level';try{const data=await searchLevels(q);const arr=Array.isArray(data)?data:(data?.levels||data?.data||[]);el.innerHTML=arr.slice(0,100).map(x=>`<div class="list-item"><span><b>${escapeHtml(x.name||'Unknown')}</b><br><small>ID ${escapeHtml(String(x.id||x.levelID||''))} • ${escapeHtml(x.author||x.creator||'')}</small></span><small>${escapeHtml(x.difficulty||'')}</small></div>`).join('')||'<small>No results.</small>'}catch(e){el.innerHTML='<small>Could not search levels.</small>'}}
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+async function searchLevels(query) {
+    const response = await fetch(
+        `${GDBROWSER}/search/${encodeURIComponent(query)}`
+    );
 
-$('loadExtremes').onclick=loadExtremes;$('searchLevels').onclick=loadAllLevels;
-$('dailyDate').textContent=`Daily seed: ${dailySeed()} • resets at 00:00 UTC`;
+    if (!response.ok) {
+        throw new Error('GDBrowser search failed');
+    }
+
+    return await response.json();
+}
+
+
+// ============================================================
+// RANDOM LEVEL
+// ============================================================
+
+async function getRandomLevel() {
+
+    /*
+     * Searching several common characters gives us a pool of
+     * real levels instead of relying on a hardcoded list.
+     */
+
+    const queries = [
+        'the',
+        'a',
+        'i',
+        'gd',
+        'level',
+        'x',
+        'y'
+    ];
+
+    try {
+        const query =
+            queries[Math.floor(Math.random() * queries.length)];
+
+        const data = await searchLevels(query);
+
+        const levels =
+            Array.isArray(data)
+                ? data
+                : (
+                    data?.levels ||
+                    data?.data ||
+                    []
+                );
+
+        if (levels.length > 0) {
+            return levels[
+                Math.floor(Math.random() * levels.length)
+            ];
+        }
+
+    } catch (error) {
+        console.warn('Random level search failed:', error);
+    }
+
+    return fallbackLevels[
+        Math.floor(Math.random() * fallbackLevels.length)
+    ];
+}
+
+
+// ============================================================
+// TEXT / ANSWER CHECKING
+// ============================================================
+
+function normalize(text) {
+    return String(text || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '');
+}
+
+
+function levenshtein(a, b) {
+    a = normalize(a);
+    b = normalize(b);
+
+    const matrix = Array.from(
+        { length: a.length + 1 },
+        (_, i) => [i]
+    );
+
+    for (let j = 1; j <= b.length; j++) {
+        matrix[0][j] = j;
+    }
+
+    for (let i = 1; i <= a.length; i++) {
+
+        matrix[i] = [i];
+
+        for (let j = 1; j <= b.length; j++) {
+
+            matrix[i][j] = Math.min(
+                matrix[i - 1][j] + 1,
+                matrix[i][j - 1] + 1,
+                matrix[i - 1][j - 1] +
+                (a[i - 1] === b[j - 1] ? 0 : 1)
+            );
+        }
+    }
+
+    return matrix[a.length][b.length];
+}
+
+
+function nameCorrect(input, answer) {
+
+    const a = normalize(input);
+    const b = normalize(answer);
+
+    if (!a) {
+        return false;
+    }
+
+    if (a === b) {
+        return true;
+    }
+
+    if (
+        a.length >= 5 &&
+        (
+            b.includes(a) ||
+            a.includes(b)
+        )
+    ) {
+        return true;
+    }
+
+    return (
+        levenshtein(a, b) <=
+        Math.max(
+            1,
+            Math.floor(b.length * 0.12)
+        )
+    );
+}
+
+
+// ============================================================
+// LEVEL IMAGE
+// ============================================================
+
+/*
+ * IMPORTANT:
+ *
+ * We do NOT use the old broken gd-level-api.liamt.xyz server.
+ *
+ * Instead, we try to obtain an actual image associated with the
+ * level through GDBrowser / Geometry Dash resources.
+ *
+ * If no image can be loaded, the game displays the GDBrowser
+ * level page inside a visual card rather than generating the old
+ * "MYSTERY LEVEL" fake image.
+ */
+
+
+async function imageFor(level) {
+
+    const id =
+        level.id ||
+        level.levelID ||
+        level.levelId;
+
+    if (!id) {
+        throw new Error('Level has no ID');
+    }
+
+    /*
+     * Known GDBrowser difficulty icons aren't level screenshots,
+     * so we deliberately don't use them as fake level images.
+     *
+     * First attempt: GDBrowser's level image routes.
+     */
+
+    const candidates = [
+        `https://gdbrowser.com/assets/levels/${id}.png`,
+        `https://gdbrowser.com/assets/level/${id}.png`,
+        `https://gdbrowser.com/level/${id}.png`,
+        `https://gdbrowser.com/levels/${id}.png`
+    ];
+
+    for (const url of candidates) {
+
+        const works = await testImage(url);
+
+        if (works) {
+            return url;
+        }
+    }
+
+    /*
+     * If GDBrowser doesn't expose a direct image for this level,
+     * create a useful visual card using the REAL level metadata.
+     *
+     * This is NOT the old "MYSTERY LEVEL" fallback.
+     */
+
+    return makeLevelCard(level);
+}
+
+
+function testImage(url) {
+
+    return new Promise(resolve => {
+
+        const image = new Image();
+
+        let finished = false;
+
+        const finish = result => {
+
+            if (finished) {
+                return;
+            }
+
+            finished = true;
+            resolve(result);
+        };
+
+        image.onload = () => {
+            finish(
+                image.naturalWidth > 100 &&
+                image.naturalHeight > 100
+            );
+        };
+
+        image.onerror = () => {
+            finish(false);
+        };
+
+        image.src =
+            url +
+            (url.includes('?') ? '&' : '?') +
+            'v=' +
+            Date.now();
+    });
+}
+
+
+function makeLevelCard(level) {
+
+    const canvas = document.createElement('canvas');
+
+    canvas.width = 1280;
+    canvas.height = 720;
+
+    const ctx = canvas.getContext('2d');
+
+    let hash = 0;
+
+    for (const character of String(
+        level.id ||
+        level.name ||
+        'GDLE'
+    )) {
+        hash =
+            (
+                hash * 31 +
+                character.charCodeAt(0)
+            ) >>> 0;
+    }
+
+    const hue = hash % 360;
+
+    const gradient =
+        ctx.createLinearGradient(
+            0,
+            0,
+            1280,
+            720
+        );
+
+    gradient.addColorStop(
+        0,
+        `hsl(${hue}, 70%, 20%)`
+    );
+
+    gradient.addColorStop(
+        1,
+        `hsl(${(hue + 80) % 360}, 70%, 8%)`
+    );
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(
+        0,
+        0,
+        1280,
+        720
+    );
+
+
+    // Decorative Geometry Dash-style circles
+
+    ctx.fillStyle =
+        'rgba(255,255,255,0.08)';
+
+    for (let i = 0; i < 18; i++) {
+
+        ctx.beginPath();
+
+        ctx.arc(
+            (hash * (i + 3)) % 1280,
+            (hash * 7 + i * 83) % 720,
+            50 + i * 8,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+    }
+
+
+    // Level name
+
+    ctx.fillStyle = '#ffffff';
+
+    ctx.font =
+        '900 62px system-ui, sans-serif';
+
+    const name =
+        String(level.name || 'Unknown Level');
+
+    ctx.fillText(
+        name.substring(0, 28),
+        70,
+        110
+    );
+
+
+    // Creator
+
+    ctx.font =
+        '600 32px system-ui, sans-serif';
+
+    ctx.fillStyle =
+        'rgba(255,255,255,0.75)';
+
+    ctx.fillText(
+        'by ' +
+        String(
+            level.author ||
+            level.creator ||
+            'Unknown'
+        ).substring(0, 35),
+        70,
+        160
+    );
+
+
+    // Level ID
+
+    ctx.font =
+        '500 25px system-ui, sans-serif';
+
+    ctx.fillStyle =
+        'rgba(255,255,255,0.55)';
+
+    ctx.fillText(
+        `Level ID: ${level.id || 'unknown'}`,
+        70,
+        205
+    );
+
+
+    // Difficulty
+
+    if (level.difficulty) {
+
+        ctx.fillText(
+            String(level.difficulty),
+            70,
+            245
+        );
+    }
+
+
+    // GDLE branding
+
+    ctx.font =
+        '800 24px system-ui, sans-serif';
+
+    ctx.fillStyle =
+        'rgba(255,255,255,0.45)';
+
+    ctx.fillText(
+        'GDLE',
+        70,
+        650
+    );
+
+
+    return canvas.toDataURL(
+        'image/jpeg',
+        0.9
+    );
+}
+
+
+// ============================================================
+// GAME START
+// ============================================================
+
+async function startGame() {
+
+    clearInterval(timerId);
+
+    roundDone = false;
+
+    $('feedback').textContent = '';
+    $('feedback').className = 'feedback';
+
+    $('nextBtn').classList.add('hidden');
+
+    $('submitBtn').disabled = false;
+
+    $('answer').value = '';
+    $('percent').value = '';
+
+    $('setupPanel').classList.add('hidden');
+    $('gamePanel').classList.remove('hidden');
+
+
+    // Mode label
+
+    $('modeLabel').textContent =
+        currentMode === 'name'
+            ? 'GUESS THE LEVEL'
+            : currentMode === 'namePercent'
+                ? 'LEVEL + PERCENTAGE'
+                : 'EXTREME POSITION';
+
+
+    // Question
+
+    $('questionText').textContent =
+        currentMode === 'position'
+            ? "What is this level's current Demon List position?"
+            : 'What level is this?';
+
+
+    $('answer').classList.remove('hidden');
+
+    $('percent').classList.toggle(
+        'hidden',
+        currentMode !== 'namePercent'
+    );
+
+
+    $('answer').placeholder =
+        'Level name...';
+
+
+    try {
+
+        // ====================================================
+        // EXTREME / DEMON LIST MODE
+        // ====================================================
+
+        if (currentMode === 'position') {
+
+            currentLevel =
+                await getRandomExtreme();
+
+        } else {
+
+            currentLevel =
+                await getRandomLevel();
+
+        }
+
+
+        // ====================================================
+        // GET FULL LEVEL DATA
+        // ====================================================
+
+        const id =
+            currentLevel.id ||
+            currentLevel.levelID ||
+            currentLevel.levelId;
+
+
+        try {
+
+            const full =
+                await getLevel(id);
+
+            currentLevel = {
+                ...currentLevel,
+                ...full
+            };
+
+        } catch (error) {
+
+            console.warn(
+                'Could not get full level data:',
+                error
+            );
+        }
+
+
+        // ====================================================
+        // IMAGE
+        // ====================================================
+
+        const image =
+            await imageFor(currentLevel);
+
+        $('levelImage').src = image;
+
+
+        // Position question
+
+        if (currentMode === 'position') {
+
+            $('questionText').textContent =
+                "What is this level's current Demon List position?";
+        }
+
+
+        startTimer();
+
+    } catch (error) {
+
+        console.error(error);
+
+        $('feedback').textContent =
+            'Could not load a level. Try again.';
+
+        $('feedback').className =
+            'feedback bad';
+    }
+}
+
+
+// ============================================================
+// POINTERCRATE / DEMON LIST
+// ============================================================
+
+async function getRandomExtreme() {
+
+    if (!demonCache.length) {
+
+        const response =
+            await fetch(
+                POINTERCRATE,
+                {
+                    headers: {
+                        Accept: 'application/json'
+                    }
+                }
+            );
+
+        if (!response.ok) {
+            throw new Error(
+                'Pointercrate request failed'
+            );
+        }
+
+        const data =
+            await response.json();
+
+        demonCache =
+            Array.isArray(data)
+                ? data
+                : (
+                    data?.data ||
+                    []
+                );
+    }
+
+
+    if (!demonCache.length) {
+        throw new Error(
+            'No demons returned by Pointercrate'
+        );
+    }
+
+
+    const demon =
+        demonCache[
+            Math.floor(
+                Math.random() *
+                demonCache.length
+            )
+        ];
+
+
+    return {
+        id:
+            demon.level_id ||
+            demon.levelId ||
+            demon.id,
+
+        name:
+            demon.name,
+
+        position:
+            demon.position,
+
+        author:
+            typeof demon.publisher === 'object'
+                ? demon.publisher?.name
+                : (
+                    demon.publisher ||
+                    demon.creator ||
+                    ''
+                ),
+
+        verifier:
+            typeof demon.verifier === 'object'
+                ? demon.verifier?.name
+                : (
+                    demon.verifier ||
+                    ''
+                )
+    };
+}
+
+
+// ============================================================
+// TIMER
+// ============================================================
+
+function startTimer() {
+
+    clearInterval(timerId);
+
+    endAt =
+        performance.now() +
+        currentTime * 1000;
+
+    updateTimer();
+
+    timerId =
+        setInterval(
+            updateTimer,
+            50
+        );
+}
+
+
+function updateTimer() {
+
+    const left =
+        Math.max(
+            0,
+            endAt -
+            performance.now()
+        );
+
+
+    $('timer').textContent =
+        (left / 1000).toFixed(1);
+
+
+    $('timerBar').style.width =
+        (
+            left /
+            (currentTime * 1000) *
+            100
+        ) + '%';
+
+
+    if (left <= 0) {
+
+        clearInterval(timerId);
+
+        finishRound(
+            false,
+            "Time's up!"
+        );
+    }
+}
+
+
+// ============================================================
+// ROUND FINISH
+// ============================================================
+
+function finishRound(correct, message) {
+
+    if (roundDone) {
+        return;
+    }
+
+    roundDone = true;
+
+    clearInterval(timerId);
+
+    $('submitBtn').disabled = true;
+
+    $('nextBtn').classList.remove('hidden');
+
+    $('feedback').textContent =
+        message;
+
+    $('feedback').className =
+        'feedback ' +
+        (
+            correct
+                ? 'ok'
+                : 'bad'
+        );
+
+    $('scoreLine').textContent =
+        `Score: ${score}`;
+}
+
+
+// ============================================================
+// SUBMIT ANSWER
+// ============================================================
+
+function submitAnswer() {
+
+    if (
+        roundDone ||
+        !currentLevel
+    ) {
+        return;
+    }
+
+
+    const nameOK =
+        nameCorrect(
+            $('answer').value,
+            currentLevel.name
+        );
+
+
+    let correct = nameOK;
+    let details = '';
+
+
+    // ========================================================
+    // NAME + PERCENTAGE
+    // ========================================================
+
+    if (currentMode === 'namePercent') {
+
+        const guessed =
+            Number(
+                $('percent').value
+            );
+
+
+        const target =
+            Number(
+                currentLevel.percent ??
+                currentLevel.progress ??
+                currentLevel.bestPercent ??
+                randomPercent(
+                    currentLevel.id
+                )
+            );
+
+
+        const percentOK =
+            Number.isFinite(guessed) &&
+            Math.abs(
+                guessed -
+                target
+            ) <= 2;
+
+
+        correct =
+            nameOK &&
+            percentOK;
+
+
+        details =
+            `Correct: ${currentLevel.name} • ${target}%`;
+    }
+
+
+    // ========================================================
+    // DEMON POSITION
+    // ========================================================
+
+    else if (currentMode === 'position') {
+
+        const guessed =
+            Number(
+                $('percent').value ||
+                $('answer').value
+            );
+
+
+        correct =
+            Number.isFinite(guessed) &&
+            guessed ===
+            Number(
+                currentLevel.position
+            );
+
+
+        details =
+            `Correct: #${currentLevel.position} — ${currentLevel.name}`;
+    }
+
+
+    // ========================================================
+    // NORMAL MODE
+    // ========================================================
+
+    else {
+
+        details =
+            `Correct: ${currentLevel.name}`;
+    }
+
+
+    if (correct) {
+
+        score += 1;
+
+        finishRound(
+            true,
+            '✓ Correct! ' +
+            details
+        );
+
+    } else {
+
+        finishRound(
+            false,
+            '✕ ' +
+            details
+        );
+    }
+}
+
+
+// ============================================================
+// PERCENTAGE FALLBACK
+// ============================================================
+
+function randomPercent(seed) {
+
+    let number = 0;
+
+    for (const character of String(seed)) {
+
+        number =
+            (
+                number * 33 +
+                character.charCodeAt(0)
+            ) % 101;
+    }
+
+    return Math.max(
+        1,
+        number
+    );
+}
+
+
+// ============================================================
+// DAILY CHALLENGE
+// ============================================================
+
+async function startDaily(mode) {
+
+    currentMode = mode;
+
+    prepareGame();
+
+    await startGame();
+}
+
+
+function dailySeed() {
+
+    const date =
+        new Date();
+
+    return (
+        `${date.getUTCFullYear()}-` +
+        `${date.getUTCMonth() + 1}-` +
+        `${date.getUTCDate()}`
+    );
+}
+
+
+// ============================================================
+// DEMON LIST PAGE
+// ============================================================
+
+async function loadDemonList() {
+
+    const element =
+        $('demonList');
+
+    element.innerHTML =
+        '<small>Loading current Demon List…</small>';
+
+
+    try {
+
+        const response =
+            await fetch(
+                POINTERCRATE,
+                {
+                    headers: {
+                        Accept: 'application/json'
+                    }
+                }
+            );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                'Pointercrate request failed'
+            );
+        }
+
+
+        const data =
+            await response.json();
+
+
+        demonCache =
+            Array.isArray(data)
+                ? data
+                : (
+                    data?.data ||
+                    []
+                );
+
+
+        element.innerHTML =
+            demonCache
+                .slice(0, 150)
+                .map((demon, index) => {
+
+                    const publisher =
+                        typeof demon.publisher === 'object'
+                            ? demon.publisher?.name
+                            : (
+                                demon.publisher ||
+                                ''
+                            );
+
+
+                    const verifier =
+                        typeof demon.verifier === 'object'
+                            ? demon.verifier?.name
+                            : (
+                                demon.verifier ||
+                                ''
+                            );
+
+
+                    return `
+                        <div class="list-item">
+
+                            <span>
+
+                                <b>
+                                    #${demon.position || index + 1}
+                                    — ${escapeHtml(demon.name)}
+                                </b>
+
+                                <br>
+
+                                <small>
+                                    ${escapeHtml(publisher)}
+                                </small>
+
+                            </span>
+
+                            <small>
+                                ${escapeHtml(verifier)}
+                            </small>
+
+                        </div>
+                    `;
+                })
+                .join('');
+
+
+    } catch (error) {
+
+        console.error(error);
+
+        element.innerHTML =
+            '<small>Could not load Pointercrate right now.</small>';
+    }
+}
+
+
+// ============================================================
+// EXTREME DEMONS SEARCH
+// ============================================================
+
+async function loadExtremes() {
+
+    const element =
+        $('extremeList');
+
+    element.innerHTML =
+        '<small>Loading…</small>';
+
+
+    try {
+
+        const query =
+            $('extremeSearch').value.trim();
+
+
+        /*
+         * If the user hasn't typed anything, use "demon".
+         */
+
+        const search =
+            query ||
+            'demon';
+
+
+        const data =
+            await searchLevels(search);
+
+
+        const levels =
+            Array.isArray(data)
+                ? data
+                : (
+                    data?.levels ||
+                    data?.data ||
+                    []
+                );
+
+
+        const extremes =
+            levels.filter(level => {
+
+                const difficulty =
+                    String(
+                        level.difficulty ||
+                        ''
+                    ).toLowerCase();
+
+
+                return (
+                    difficulty.includes('extreme') ||
+                    level.demonList
+                );
+            });
+
+
+        element.innerHTML =
+            extremes
+                .slice(0, 100)
+                .map(level => {
+
+                    return `
+                        <div class="list-item">
+
+                            <span>
+
+                                <b>
+                                    ${escapeHtml(
+                                        level.name ||
+                                        'Unknown'
+                                    )}
+                                </b>
+
+                                <br>
+
+                                <small>
+                                    ${escapeHtml(
+                                        level.author ||
+                                        level.creator ||
+                                        ''
+                                    )}
+                                </small>
+
+                            </span>
+
+                            <small>
+                                ${
+                                    level.demonList
+                                        ? '#' + level.demonList
+                                        : 'Extreme Demon'
+                                }
+                            </small>
+
+                        </div>
+                    `;
+                })
+                .join('') ||
+            '<small>No results. Try a different search.</small>';
+
+
+    } catch (error) {
+
+        console.error(error);
+
+        element.innerHTML =
+            '<small>Could not load extreme demons.</small>';
+    }
+}
+
+
+// ============================================================
+// ALL LEVELS SEARCH
+// ============================================================
+
+async function loadAllLevels() {
+
+    const element =
+        $('allLevelList');
+
+    element.innerHTML =
+        '<small>Loading…</small>';
+
+
+    const query =
+        $('levelSearch').value.trim() ||
+        'level';
+
+
+    try {
+
+        const data =
+            await searchLevels(query);
+
+
+        const levels =
+            Array.isArray(data)
+                ? data
+                : (
+                    data?.levels ||
+                    data?.data ||
+                    []
+                );
+
+
+        element.innerHTML =
+            levels
+                .slice(0, 100)
+                .map(level => {
+
+                    const id =
+                        level.id ||
+                        level.levelID ||
+                        level.levelId ||
+                        '';
+
+
+                    return `
+                        <div class="list-item">
+
+                            <span>
+
+                                <b>
+                                    ${escapeHtml(
+                                        level.name ||
+                                        'Unknown Level'
+                                    )}
+                                </b>
+
+                                <br>
+
+                                <small>
+                                    ID ${escapeHtml(String(id))}
+                                    •
+                                    ${escapeHtml(
+                                        level.author ||
+                                        level.creator ||
+                                        ''
+                                    )}
+                                </small>
+
+                            </span>
+
+                            <small>
+                                ${escapeHtml(
+                                    level.difficulty ||
+                                    ''
+                                )}
+                            </small>
+
+                        </div>
+                    `;
+                })
+                .join('') ||
+            '<small>No results.</small>';
+
+
+    } catch (error) {
+
+        console.error(error);
+
+        element.innerHTML =
+            '<small>Could not search levels.</small>';
+    }
+}
+
+
+// ============================================================
+// HTML ESCAPE
+// ============================================================
+
+function escapeHtml(value) {
+
+    return String(value)
+        .replace(
+            /[&<>"']/g,
+            character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            }[character])
+        );
+}
+
+
+// ============================================================
+// SEARCH BUTTONS
+// ============================================================
+
+$('loadExtremes').onclick =
+    loadExtremes;
+
+$('searchLevels').onclick =
+    loadAllLevels;
+
+
+// ============================================================
+// DAILY DATE
+// ============================================================
+
+$('dailyDate').textContent =
+    `Daily seed: ${dailySeed()} • resets at 00:00 UTC`;
+
+
+// ============================================================
+// INITIAL LOAD
+// ============================================================
+
 loadDemonList();
+```
