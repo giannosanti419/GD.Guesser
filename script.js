@@ -56,7 +56,22 @@ async function getRandomLevel(){
 }
 
 function normalize(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'')}
-function levenshtein(a,b){a=normalize(a);b=normalize(b);const d=Array.from({length:a.length+1},(_,i)=>[i]);for(let j=1;j<=b.length;j++)d[0][j]=j;for(let i=1;i<=a.length;i++){for(let j=1;j<=b.length;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1))}}return d[a.length][b.length]}
+function levenshtein(a,b){
+  a=normalize(a); b=normalize(b);
+  const d=Array.from({length:a.length+1},(_,i)=>[i]);
+  for(let j=1;j<=b.length;j++) d[0][j]=j;
+  for(let i=1;i<=a.length;i++){
+    d[i]=[i];
+    for(let j=1;j<=b.length;j++){
+      d[i][j]=Math.min(
+        d[i-1][j]+1,
+        d[i][j-1]+1,
+        d[i-1][j-1]+(a[i-1]===b[j-1]?0:1)
+      );
+    }
+  }
+  return d[a.length][b.length];
+}
 function nameCorrect(input,answer){const a=normalize(input),b=normalize(answer);if(!a)return false;return a===b || (a.length>=5 && (b.includes(a)||a.includes(b))) || levenshtein(a,b)<=Math.max(1,Math.floor(b.length*.12))}
 
 async function imageFor(level){
