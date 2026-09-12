@@ -1,4 +1,4 @@
-# GDLE
+# GD GUESSER
 
 Geometry Dash level guessing game — static HTML/CSS/JavaScript MVP.
 
