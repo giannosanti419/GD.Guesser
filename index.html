@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GDLE — Geometry Dash Guessing Game</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="#home">GDLE</a>
+  <nav>
+    <button data-section="play">Play</button>
+    <button data-section="daily">Daily</button>
+    <button data-section="demonlist">Demon List</button>
+    <button data-section="extremes">Extreme Demons</button>
+    <button data-section="alllevels">All Levels</button>
+  </nav>
+</header>
+
+<main>
+<section id="home" class="section active">
+  <div class="hero">
+    <div class="eyebrow">GEOMETRY DASH • GUESSING GAME</div>
+    <h1>How well do you know GD?</h1>
+    <p>Guess the level before the timer runs out.</p>
+    <div class="home-grid">
+      <button class="mode-card" data-mode="name"><b>Guess the Level</b><span>Identify the level from its image.</span></button>
+      <button class="mode-card" data-mode="namePercent"><b>Level + Percentage</b><span>Guess both the level and the progress.</span></button>
+      <button class="mode-card" data-mode="position"><b>Extreme Position</b><span>Guess its current Demon List position.</span></button>
+      <button class="mode-card daily-card" data-daily="true"><b>Daily Challenge</b><span>One daily challenge for every mode.</span></button>
+    </div>
+  </div>
+</section>
+
+<section id="play" class="section">
+  <div class="panel setup-panel" id="setupPanel">
+    <div class="eyebrow">NEW RUN</div>
+    <h2 id="setupTitle">Guess the Level</h2>
+    <p id="setupDescription">Choose your time limit, then start.</p>
+    <label>Time limit <span id="timeValue">15</span>s</label>
+    <input id="timeSlider" type="range" min="5" max="60" step="5" value="15" />
+    <div class="time-buttons">
+      <button data-time="10">10s</button><button data-time="15">15s</button><button data-time="30">30s</button><button data-time="60">60s</button>
+    </div>
+    <button class="primary" id="startBtn">Start</button>
+  </div>
+
+  <div class="panel game-panel hidden" id="gamePanel">
+    <div class="game-head"><span id="modeLabel"></span><span class="timer" id="timer">15.0</span></div>
+    <div class="progress"><div id="timerBar"></div></div>
+    <div class="level-image-wrap"><img id="levelImage" alt="Mystery Geometry Dash level" /></div>
+    <div class="question" id="questionText">What level is this?</div>
+    <div class="answer-row">
+      <input id="answer" autocomplete="off" placeholder="Level name..." />
+      <input id="percent" class="percent-input hidden" type="number" min="0" max="100" placeholder="%" />
+      <button class="primary" id="submitBtn">Guess</button>
+    </div>
+    <div id="feedback" class="feedback"></div>
+    <div id="scoreLine" class="scoreline"></div>
+    <button id="nextBtn" class="secondary hidden">Next level →</button>
+  </div>
+</section>
+
+<section id="daily" class="section">
+  <div class="panel">
+    <div class="eyebrow">DAILY</div>
+    <h2>Today's challenges</h2>
+    <p id="dailyDate"></p>
+    <div class="daily-grid">
+      <button class="daily-mode" data-daily-mode="name"><b>Guess the Level</b><span id="dailyNameStatus"></span></button>
+      <button class="daily-mode" data-daily-mode="namePercent"><b>Level + Percentage</b><span id="dailyPercentStatus"></span></button>
+      <button class="daily-mode" data-daily-mode="position"><b>Extreme Position</b><span id="dailyPositionStatus"></span></button>
+    </div>
+  </div>
+</section>
+
+<section id="demonlist" class="section"><div class="panel"><div class="eyebrow">POINTERCRATE</div><h2>Demon List</h2><p>Live ranked demons loaded from Pointercrate.</p><div id="demonList" class="list"></div></div></section>
+<section id="extremes" class="section"><div class="panel"><div class="eyebrow">EXTREME DEMONS</div><h2>Extreme Demons</h2><p>Extreme Demon results from Geometry Dash data.</p><div class="toolbar"><input id="extremeSearch" placeholder="Search extreme demons..." /><button id="loadExtremes" class="primary">Load</button></div><div id="extremeList" class="list"></div></div></section>
+<section id="alllevels" class="section"><div class="panel"><div class="eyebrow">LEVEL DATABASE</div><h2>All Levels</h2><p>Search the GD level database. Results are loaded on demand.</p><div class="toolbar"><input id="levelSearch" placeholder="Search a level..." /><button id="searchLevels" class="primary">Search</button></div><div id="allLevelList" class="list"></div></div></section>
+</main>
+
+<footer>GDLE is an unofficial Geometry Dash fan project. It is not affiliated with RobTop Games.</footer>
+<script src="script.js"></script>
+</body>
+</html>
